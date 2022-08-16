@@ -16,9 +16,11 @@
     using EventTrigger = Microsoft.Xaml.Interactions.Core.EventTriggerBehavior;
 #else
     using System.Windows;
+    using System.Windows.Controls;
     using System.Windows.Controls.Primitives;
     using System.Windows.Data;
     using System.Windows.Markup;
+    using System.Windows.Threading;
     using Microsoft.Xaml.Behaviors;
     using EventTrigger = Microsoft.Xaml.Behaviors.EventTrigger;
 #endif
@@ -463,15 +465,39 @@
                 handler = (s, e) => {
                     if (string.IsNullOrEmpty(e.PropertyName) || e.PropertyName == matchingGuardName)
                     {
-                        Caliburn.Micro.Execute.OnUIThread(() => {
-                            var message = context.Message;
-                            if (message == null)
+                        var dispatcher = context.View?.Dispatcher ?? (context.Target as DispatcherObject)?.Dispatcher;
+                        if (dispatcher != null)
+                        {
+                            if (dispatcher.CheckAccess())
                             {
-                                inpc.PropertyChanged -= handler;
-                                return;
+                                InnerUpdateAvailability();
                             }
-                            message.UpdateAvailability();
-                        });
+                            else
+                            {
+                                dispatcher.Invoke(() =>
+                                {
+                                    InnerUpdateAvailability();
+                                });
+                            }
+                        }
+                        else
+                        {
+                            Execute.OnUIThread(() =>
+                            {
+                                InnerUpdateAvailability();
+                            });
+                        }
+                    }
+
+                    void InnerUpdateAvailability()
+                    {
+                        var message = context.Message;
+                        if (message == null)
+                        {
+                            inpc.PropertyChanged -= handler;
+                            return;
+                        }
+                        message.UpdateAvailability();
                     }
                 };
 
