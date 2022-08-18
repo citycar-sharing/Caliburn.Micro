@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Windows.Threading;
 
 namespace Caliburn.Micro
 {
@@ -166,7 +167,14 @@ namespace Caliburn.Micro
 
             var closeAction = PlatformProvider.Current.GetViewCloseAction(this, Views.Values, dialogResult);
 
-            await Execute.OnUIThreadAsync(async () => await closeAction(CancellationToken.None));
+            if (GetView() is DispatcherObject v && v.Dispatcher != null)
+            {
+                await v.Dispatcher.InvokeAsync(() => closeAction(CancellationToken.None));
+            }
+            else
+            {
+                await Execute.OnUIThreadAsync(async () => await closeAction(CancellationToken.None));
+            }
         }
 
         /// <summary>

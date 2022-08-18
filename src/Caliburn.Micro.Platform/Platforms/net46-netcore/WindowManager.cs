@@ -1,14 +1,12 @@
-using System;
 using System.Collections.Generic;
-using System.ComponentModel;
 using System.Linq;
-using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Data;
 using System.Windows.Navigation;
+using System.Windows.Threading;
 
 namespace Caliburn.Micro
 {
@@ -24,7 +22,8 @@ namespace Caliburn.Micro
         /// <param name="context">The context.</param>
         /// <param name="settings">The optional dialog settings.</param>
         /// <returns>The dialog result.</returns>
-        Task<bool?> ShowDialogAsync(object rootModel, object context = null, IDictionary<string, object> settings = null);
+        Task<bool?> ShowDialogAsync(object rootModel, object context = null, IDictionary<string, object> settings = null, Dispatcher p_disp = null,
+            bool? p_useViewDispatcher = null);
 
         /// <summary>
         /// Shows a non-modal window for the specified model.
@@ -55,10 +54,11 @@ namespace Caliburn.Micro
         /// <param name="context">The context.</param>
         /// <param name="settings">The dialog popup settings.</param>
         /// <returns>The dialog result.</returns>
-        public virtual async Task<bool?> ShowDialogAsync(object rootModel, object context = null, IDictionary<string, object> settings = null)
+        public virtual async Task<bool?> ShowDialogAsync(object rootModel, object context = null, IDictionary<string, object> settings = null, Dispatcher p_disp = null,
+            bool? p_useViewDispatcher = null)
         {
-            var window = await CreateWindowAsync(rootModel, true, context, settings);
-                
+            var window = await CreateWindowAsync(rootModel, true, context, settings, p_disp, p_useViewDispatcher);
+
             return window.ShowDialog();
         }
 
@@ -161,25 +161,72 @@ namespace Caliburn.Micro
         /// <param name="context">The view context.</param>
         /// <param name="settings">The optional popup settings.</param>
         /// <returns>The window.</returns>
-        protected virtual async Task<Window> CreateWindowAsync(object rootModel, bool isDialog, object context, IDictionary<string, object> settings)
+        protected virtual async Task<Window> CreateWindowAsync(
+            object rootModel, 
+            bool isDialog, 
+            object context, 
+            IDictionary<string, object> settings, 
+            Dispatcher p_disp = null,
+            bool? p_useViewDispatcher = null)
         {
-            var view = EnsureWindow(rootModel, ViewLocator.LocateForModel(rootModel, null, context), isDialog);
-            ViewModelBinder.Bind(rootModel, view, context);
-
-            var haveDisplayName = rootModel as IHaveDisplayName;
-            if (string.IsNullOrEmpty(view.Title) && haveDisplayName != null && !ConventionManager.HasBinding(view, Window.TitleProperty))
+            if (p_useViewDispatcher != true)
             {
-                var binding = new Binding("DisplayName") { Mode = BindingMode.TwoWay };
-                view.SetBinding(Window.TitleProperty, binding);
+                var d = p_disp ?? Application.Current?.Dispatcher;
+                if (d != null)
+                {
+                    if (d.CheckAccess())
+                    {
+                        return await InnerCreateWindow();
+                    }
+                    else
+                    {
+                        return await d.InvokeAsync(() => InnerCreateWindow()).Task.Unwrap();
+                    }
+                }
+            }
+            return await InnerCreateWindow(p_useViewDispatcher == true);
+
+            async Task<Window> InnerCreateWindow(bool p_runOnViewDisp = false)
+            {
+                var view = ViewLocator.LocateForModel(rootModel, null, context);
+                if (p_runOnViewDisp && view.Dispatcher != null)
+                {
+                    var d = view.Dispatcher;
+                    if (!d.CheckAccess())
+                    {
+                        return await d.InvokeAsync(() => CreateWindow()).Task.Unwrap();
+                    }
+                }
+                return await CreateWindow();
+                
+                async Task<Window> CreateWindow()
+                {
+                    var window = EnsureWindow(rootModel, view, isDialog);
+                    ViewModelBinder.Bind(rootModel, window, context);
+
+                    var haveDisplayName = rootModel as IHaveDisplayName;
+                    if (string.IsNullOrEmpty(window.Title) && haveDisplayName != null && !ConventionManager.HasBinding(window, Window.TitleProperty))
+                    {
+                        var binding = new Binding("DisplayName") { Mode = BindingMode.TwoWay };
+                        window.SetBinding(Window.TitleProperty, binding);
+                    }
+
+                    ApplySettings(window, settings);
+
+                    var conductor = new WindowConductor(rootModel, window);
+
+                    await conductor.InitialiseAsync();
+
+                    return window;
+                }
             }
 
-            ApplySettings(view, settings);
+            
+        }
 
-            var conductor = new WindowConductor(rootModel, view);
-
-            await conductor.InitialiseAsync();
-
-            return view;
+        private Task<Window> InnerCreateWindow(bool v)
+        {
+            throw new System.NotImplementedException();
         }
 
         /// <summary>
@@ -191,16 +238,7 @@ namespace Caliburn.Micro
         /// <returns>The window.</returns>
         protected virtual Window EnsureWindow(object model, object view, bool isDialog)
         {
-
-            if (view is Window window)
-            {
-                var owner = InferOwnerOf(window);
-                if (owner != null && isDialog)
-                {
-                    window.Owner = owner;
-                }
-            }
-            else
+            if (!(view is Window window))
             {
                 window = new Window
                 {
@@ -208,18 +246,8 @@ namespace Caliburn.Micro
                     SizeToContent = SizeToContent.WidthAndHeight
                 };
 
-                window.SetValue(View.IsGeneratedProperty, true);
-
-                var owner = InferOwnerOf(window);
-                if (owner != null)
-                {
-                    window.WindowStartupLocation = WindowStartupLocation.CenterOwner;
-                    window.Owner = owner;
-                }
-                else
-                {
-                    window.WindowStartupLocation = WindowStartupLocation.CenterScreen;
-                }
+                window.SetValue(View.IsGeneratedProperty, true); 
+                window.WindowStartupLocation = WindowStartupLocation.CenterScreen;                 
             }
 
             return window;

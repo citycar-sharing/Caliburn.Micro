@@ -19,7 +19,10 @@
 #if WINDOWS_UWP
         private CoreDispatcher dispatcher;
 #else
-        private Dispatcher dispatcher;
+        [ThreadStatic]
+        public static Dispatcher overrideDispatcher;
+        private Dispatcher _dispatcher;
+        private Dispatcher dispatcher => overrideDispatcher ?? _dispatcher;
 #endif
 
         /// <summary>
@@ -29,7 +32,7 @@
 #if WINDOWS_UWP
             dispatcher = Window.Current.Dispatcher;
 #else
-            dispatcher = Dispatcher.CurrentDispatcher;
+            _dispatcher = Dispatcher.CurrentDispatcher;
 #endif
         }
 
@@ -188,7 +191,10 @@
                         if (dialogResult != null) {
                             var resultProperty = contextualView.GetType().GetProperty("DialogResult");
                             if (resultProperty != null) {
-                                resultProperty.SetValue(contextualView, dialogResult, null);
+                                if (resultProperty.GetValue(contextualView) as bool? != dialogResult)
+                                {
+                                    resultProperty.SetValue(contextualView, dialogResult, null);
+                                }
                                 isClosed = true;
                             }
                         }
