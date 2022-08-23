@@ -219,14 +219,7 @@ namespace Caliburn.Micro
 
                     return window;
                 }
-            }
-
-            
-        }
-
-        private Task<Window> InnerCreateWindow(bool v)
-        {
-            throw new System.NotImplementedException();
+            }            
         }
 
         /// <summary>
